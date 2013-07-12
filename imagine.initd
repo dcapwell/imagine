@@ -1,0 +1,143 @@
+#!/bin/bash
+# Starts the imagine server
+#
+# chkconfig: 345 90 10
+# description: imagine server
+#
+### BEGIN INIT INFO
+# Provides:          imagine
+# Required-Start:    $remote_fs
+# Should-Start:
+# Required-Stop:     $remote_fs
+# Should-Stop:
+# Default-Start:     3 4 5
+# Default-Stop:      0 1 2 6
+# Short-Description: Imagine server
+### END INIT INFO
+
+. /lib/lsb/init-functions
+
+if [ -f /etc/default/imagine ] ; then
+  . /etc/default/imagine
+fi
+
+STATUS_RUNNING=0
+STATUS_DEAD=1
+STATUS_DEAD_AND_LOCK=2
+STATUS_NOT_RUNNING=3
+
+ERROR_PROGRAM_NOT_INSTALLED=5
+
+IMAGINE_LOG_DIR=/mnt/logs/imagine
+IMAGINE_HOME=/opt/imagine
+IMAGINE_RUN_DIR=/var/run
+IMAGINE_USER=imagine
+
+DATE=`date +'%Y-%m-%d'`
+
+IMAGINE_LOCK_DIR="/var/lock/subsys/"
+LOCKFILE="${IMAGINE_LOCK_DIR}/imagine"
+desc="imagine daemon"
+
+EXEC_PATH=${IMAGINE_HOME}/imagine
+IMAGINE_PID_FILE=${IMAGINE_RUN_DIR}/imagine.pid
+
+IMAGINE_SHUTDOWN_TIMEOUT=${IMAGINE_SHUTDOWN_TIMEOUT:-60}
+
+if [ ! -e $IMAGINE_LOG_DIR ]; then
+  mkdir -p $IMAGINE_LOG_DIR
+  chown $IMAGINE_USER: $IMAGINE_LOG_DIR
+fi
+
+start() {
+  [ -x $exec ] || exit $ERROR_PROGRAM_NOT_INSTALLED
+
+  checkstatus
+  status=$?
+  if [ "$status" -eq "$STATUS_RUNNING" ]; then
+    exit 0
+  fi
+
+  log_success_msg "Starting $desc (imagine): "
+  /bin/su -s /bin/bash -c "/bin/bash -c 'echo \$\$ >/tmp/imagine.pid && exec ${EXEC_PATH} 1> ${IMAGINE_LOG_DIR}/imagine-$DATE.log 2> ${IMAGINE_LOG_DIR}/imagine-stderr-$DATE.log' &" $IMAGINE_USER
+  RETVAL=$?
+  [ $RETVAL -eq 0 ] && touch $LOCKFILE
+  sleep 1 && mv /tmp/imagine.pid $IMAGINE_PID_FILE
+  return $RETVAL
+}
+stop() {
+  if [ ! -e $IMAGINE_PID_FILE ]; then
+    log_failure_msg "imagine is not running"
+    exit 0
+  fi
+
+  log_success_msg "Stopping $desc (imagine): "
+
+  IMAGINE_PID=`cat $IMAGINE_PID_FILE`
+  if [ -n $IMAGINE_PID ]; then
+    kill -TERM ${IMAGINE_PID} &>/dev/null
+    for i in `seq 1 ${IMAGINE_SHUTDOWN_TIMEOUT}` ; do
+      kill -0 ${IMAGINE_PID} &>/dev/null || break
+      sleep 1
+    done
+    kill -KILL ${IMAGINE_PID} &>/dev/null
+  fi
+  rm -f $LOCKFILE $IMAGINE_PID_FILE
+  return 0
+}
+
+restart() {
+  stop
+  start
+}
+
+checkstatus(){
+  pidofproc -p $IMAGINE_PID_FILE java > /dev/null
+  status=$?
+
+  case "$status" in
+    $STATUS_RUNNING)
+      log_success_msg "imagine is running"
+      ;;
+    $STATUS_DEAD)
+      log_failure_msg "imagine is dead and pid file exists"
+      ;;
+    $STATUS_DEAD_AND_LOCK)
+      log_failure_msg "imagine is dead and lock file exists"
+      ;;
+    $STATUS_NOT_RUNNING)
+      log_failure_msg "imagine is not running"
+      ;;
+    *)
+      log_failure_msg "imagine status is unknown"
+      ;;
+  esac
+  return $status
+}
+
+condrestart(){
+  [ -e ${LOCKFILE} ] && restart || :
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  status)
+    checkstatus
+    ;;
+  restart)
+    restart
+    ;;
+  condrestart|try-restart)
+    condrestart
+    ;;
+  *)
+    echo $"Usage: $0 {start|stop|status|restart|try-restart|condrestart}"
+    exit 1
+esac
+
+exit $RETVAL

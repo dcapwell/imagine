@@ -39,9 +39,7 @@ func decoder(ext string) (Decoder, error) {
 }
 
 func encoder(format string) Encoder {
-	if format == "jpeg" {
-		return jpgEncoder
-	} else if format == "png" {
+	if format == "png" {
 		return png.Encode
 	}
 	return jpgEncoder
